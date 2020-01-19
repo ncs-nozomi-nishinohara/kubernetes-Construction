@@ -15,7 +15,7 @@
 
 ### docker-ce のインストール
 
-```bash
+```bash:bash
 # パッケージの更新
 sudo apt-get update
 # 必要モジュールのインストール
@@ -62,7 +62,7 @@ sudo systemctl start docker
 
 補足情報
 
-```bash
+```bash:bash
 # インストール可能なリスト
 apt-cache madison docker-ce
 # バージョンを指定してインストール
@@ -80,14 +80,14 @@ sudo apt-add-repository "deb http://apt.kubernetes.io/ kubernetes-xenial main"
 
 ### リポジトリの更新
 
-```bash
+```bash:bash
 sudo apt update
 sudo apt install -y kubeadm
 ```
 
 ### スワップ OFF
 
-```bash
+```bash:bash
 sudo swapoff -a
 
 ## 再起動後に適応される？
@@ -96,13 +96,13 @@ sudo swapoff -a
 
 ### kubeadm でセットアップ
 
-```bash
+```bash:bash
 sudo kubeadm init --pod-network-cidr=10.244.0.0/16
 ```
 
 ### kubernetes config の追加
 
-```bash
+```bash:bash
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
@@ -126,7 +126,7 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 LAN 内の IP に割り振る yaml を apply する
 
-```yaml: metallb-config.yaml
+```yaml:metallb-config.yaml
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -148,7 +148,7 @@ data:
 
 `名前空間`部分は`kubectl get node`で取得できる`Name`を設定(Master の Name)
 
-```bash
+```bash:bash
 kubectl describe node node名
 
 # ~~ 中略 ~~
@@ -159,7 +159,7 @@ Taints:             <none>
 
 ### Master へ Node を追加する
 
-```bash
+```bash:bash
 sudo kubeadm join xxx.xxx.xxx.xxx:6443 --token xxxxxx.xxxxxxxxxxxxx --discovery-token-ca-cert-hash sha256:xxxxxxx
 ```
 
@@ -167,7 +167,7 @@ Master を構築した時に最後に表示される`--token` `--discovery-token
 
 ### Token が不明になった場合
 
-```bash
+```bash:bash
 # tokenが不明になった場合は再度発行すれば良い
 kubeadm token create
 openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | \
@@ -177,7 +177,7 @@ openssl dgst -sha256 -hex | sed 's/^.* //'
 
 ### Node が追加されたか確認
 
-```bash
+```bash:bash
 kubectl get nodes
 NAME           STATUS   ROLES    AGE     VERSION
 Master         Ready    master   3m11s   v1.17.1
@@ -194,7 +194,7 @@ NodePort を設定した`recommended.yaml`をデプロイする。
 
 ### 自己証明書の発行
 
-```bash
+```bash:bash
 mkdir certs
 openssl req -nodes -newkey rsa:2048 -keyout certs/dashboard.key -out certs/dashboard.csr -subj "/C=/ST=/L=/O=/OU=/CN=kubernetes-dashboard"
 openssl x509 -req -sha256 -days 365 -in certs/dashboard.csr -signkey certs/dashboard.key -out certs/dashboard.crt
@@ -202,7 +202,7 @@ openssl x509 -req -sha256 -days 365 -in certs/dashboard.csr -signkey certs/dashb
 
 ### すでに定義されている分を削除(直接デプロイした場合)
 
-```bash
+```bash:bash
 # 削除
 kubectl -n kubernetes-dashboard delete secret kubernetes-dashboard-certs
 ```
@@ -215,7 +215,7 @@ kubectl -n kubernetes-dashboard delete secret kubernetes-dashboard-certs
 
 上記の証明書ファイルを Secret オブジェクトへ設定できる形にする
 
-```bash
+```bash:bash
 # base64形式で設定する必要があるのでbase64コマンドで設定する
 # それぞれのファイルで実施する
 # certs/dashboard.crt
@@ -255,7 +255,7 @@ apply する！
 
 - [token を発行するユーザーの apply](dashboard/admin-user.yaml)
 
-```yaml: admin-user.yaml
+```yaml:admin-user.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -276,7 +276,7 @@ subjects:
     namespace: kubernetes-dashboard
 ```
 
-```bash
+```bash:bash
 kubectl apply -f admin-user.yaml
 kubectl get secret -n kubernetes-dashboard | grep admin
   admin-user-token-xxxx             kubernetes.io/service-account-token   3
@@ -287,4 +287,4 @@ kubectl describe secret -n kubernetes-dashboard admin-user-token-xxxxx
 
 `トークン`を選択し、`トークンを入力`にペーストし、サインインを行う。
 
-![dashboard](dashboard/dashboard.png)
+![dashboard](https://github.com/ncs-nozomi-nishinohara/kubernetes-Construction/blob/master/dashboard/dashboard.png)
