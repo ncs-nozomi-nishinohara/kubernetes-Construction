@@ -1,0 +1,290 @@
+# Kubernetes + Nvidi Docker の構築
+
+## 前提条件
+
+| OS     | ARCH    | GPU  |
+| :----- | :------ | :--- |
+| Ubuntu | amd64   | True |
+| Ubuntu | ppc64le | True |
+
+## docker のインストール(docker-ce)
+
+### 既存のアンインストール
+
+`sudo apt-get remove docker docker-engine docker.io containerd runc`
+
+### docker-ce のインストール
+
+```bash
+# パッケージの更新
+sudo apt-get update
+# 必要モジュールのインストール
+sudo apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg-agent \
+    software-properties-common
+
+# キーの追加
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+sudo apt-key fingerprint 0EBFCD88
+
+# リポジトリの追加
+# amd64
+sudo add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+
+# ppc64le
+sudo add-apt-repository \
+   "deb [arch=ppc64el] https://download.docker.com/linux/ubuntu \
+   $(lsb_release -cs) \
+   stable"
+
+# パッケージの更新
+sudo apt-get update
+
+# dockerのインストール
+sudo apt-get install -y docker-ce
+
+sudo usermod -aG docker $USER
+
+# dockerサービスの自動起動
+sudo systemctl enable docker
+
+# dockerサービスの起動
+sudo systemctl start docker
+
+
+```
+
+補足情報
+
+```bash
+# インストール可能なリスト
+apt-cache madison docker-ce
+# バージョンを指定してインストール
+sudo apt-get install docker-ce=<VERSION_STRING> docker-ce-cli=<VERSION_STRING> containerd.io
+```
+
+## kubernetes インストール
+
+### リポジトリにキーの登録
+
+```bash:bash
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+sudo apt-add-repository "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+```
+
+### リポジトリの更新
+
+```bash
+sudo apt update
+sudo apt install -y kubeadm
+```
+
+### スワップ OFF
+
+```bash
+sudo swapoff -a
+
+## 再起動後に適応される？
+
+```
+
+### kubeadm でセットアップ
+
+```bash
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+```
+
+### kubernetes config の追加
+
+```bash
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+
+### iptables の編集
+
+`sudo sysctl net.bridge.bridge-nf-call-iptables=1`
+
+これをしないと`core-dns`の pod が起動しない
+
+### [flannel.yaml](flannel.yaml) の追加
+
+`kubectl -f flannel.yml`
+
+### LoadBranser の構築
+
+[`metallb.yaml`](metallb.yaml)を適用する
+
+`kubectl apply metallb.yaml`
+
+LAN 内の IP に割り振る yaml を apply する
+
+```yaml: metallb-config.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: metallb-system
+  name: config
+data:
+  config: |
+    address-pools:
+    - name: default
+      protocol: layer2
+      addresses:
+      - xxx.xxx.xxx.xxx-xxx.xxx.xxx.xxx # この部分をLAN内のIPに変更する
+```
+
+### Master Nodes にもデプロイする場合(シングルマスタノード構成の場合とか)
+
+`kubectl taint nodes 名前空間 node-role.kubernetes.io/master:NoSchedule-`
+
+`名前空間`部分は`kubectl get node`で取得できる`Name`を設定(Master の Name)
+
+```bash
+kubectl describe node node名
+
+# ~~ 中略 ~~
+Taints:             <none>
+# ~~ 中略 ~~
+# 上記になっていることを確認
+```
+
+### Master へ Node を追加する
+
+```bash
+sudo kubeadm join xxx.xxx.xxx.xxx:6443 --token xxxxxx.xxxxxxxxxxxxx --discovery-token-ca-cert-hash sha256:xxxxxxx
+```
+
+Master を構築した時に最後に表示される`--token` `--discovery-token-ca-cert-hash`を設定する
+
+### Token が不明になった場合
+
+```bash
+# tokenが不明になった場合は再度発行すれば良い
+kubeadm token create
+openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | \
+openssl rsa -pubin -outform der 2>/dev/null | \
+openssl dgst -sha256 -hex | sed 's/^.* //'
+```
+
+### Node が追加されたか確認
+
+```bash
+kubectl get nodes
+NAME           STATUS   ROLES    AGE     VERSION
+Master         Ready    master   3m11s   v1.17.1
+Node1          Ready    <none>   2m10s   v1.17.1
+```
+
+### DashBorad のデプロイ
+
+kubernetes リポジトリから直接デプロイする場合はクラスタ内部からしかアクセス出来ないため、
+NodePort を設定した`recommended.yaml`をデプロイする。
+ただし、リポジトリから直接デプロイし、NodePort を設定しても
+[issue](https://github.com/kubernetes/dashboard/issues/3804) にある様なエラーが発生するためここではすでに用意している[`dashboard/recommended.yaml`](dashboard/recommended.yaml)を使用する
+また、その際に証明書の設定をする必要があるため、下記を実施すること
+
+### 自己証明書の発行
+
+```bash
+mkdir certs
+openssl req -nodes -newkey rsa:2048 -keyout certs/dashboard.key -out certs/dashboard.csr -subj "/C=/ST=/L=/O=/OU=/CN=kubernetes-dashboard"
+openssl x509 -req -sha256 -days 365 -in certs/dashboard.csr -signkey certs/dashboard.key -out certs/dashboard.crt
+```
+
+### すでに定義されている分を削除(直接デプロイした場合)
+
+```bash
+# 削除
+kubectl -n kubernetes-dashboard delete secret kubernetes-dashboard-certs
+```
+
+### 証明書を pod から使用できる様にする
+
+- certs/dashboard.crt
+- certs/dashboard.csr
+- certs/dashboard.key
+
+上記の証明書ファイルを Secret オブジェクトへ設定できる形にする
+
+```bash
+# base64形式で設定する必要があるのでbase64コマンドで設定する
+# それぞれのファイルで実施する
+# certs/dashboard.crt
+# certs/dashboard.csr
+# certs/dashboard.key
+
+echo -n 'certs/dashboard.crtの内容(-----BEGIN CERTIFICATE----- XXXX -----END CERTIFICATE-----)' | base64
+Y2VydHMvZGFzaGJvYXJkLmNydOOBruWGheWuuSgtLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS0gWFhYWCAtLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tKQ==
+```
+
+[recommended.yaml](dashboard/recommended.yaml) の編集
+
+```yaml:recommended.yaml
+---
+apiVersion: v1
+data:
+  dashboard.crt: base64に変換された.crtファイルを記述
+  dashboard.csr: base64に変換された.crsファイルを記述
+  dashboard.key: base64に変換された.keyファイルを記述
+kind: Secret
+metadata:
+  name: kubernetes-dashboard-certs
+  namespace: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+type: Opaque
+```
+
+apply する！
+
+`kubectl apply -f dashboard/recommended.yaml`
+
+### ログイン用のトークンを設定
+
+ログイン画面には token or kubeconfig が求められます。
+今回は Token を用いてログインする方法を記載します。
+
+- [token を発行するユーザーの apply](dashboard/admin-user.yaml)
+
+```yaml: admin-user.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-user
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: admin-user
+    namespace: kubernetes-dashboard
+```
+
+```bash
+kubectl apply -f admin-user.yaml
+kubectl get secret -n kubernetes-dashboard | grep admin
+  admin-user-token-xxxx             kubernetes.io/service-account-token   3
+kubectl describe secret -n kubernetes-dashboard admin-user-token-xxxxx
+```
+
+表示された`token`をコピーし、
+
+`トークン`を選択し、`トークンを入力`にペーストし、サインインを行う。
+
+![dashboard](dashboard/dashboard.png)
