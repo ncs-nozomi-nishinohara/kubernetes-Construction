@@ -1,4 +1,4 @@
-# Kubernetes + Nvidi Docker の構築
+# Kubernetes + Nvidia Docker の構築
 
 ## 前提条件
 
