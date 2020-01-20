@@ -1,11 +1,22 @@
-# Kubernetes + Nvidia Docker の構築
+# [kubernetes-construction](https://github.com/ncs-nozomi-nishinohara/kubernetes-Construction)
 
-## 前提条件
+常駐先の社内勉強会用の記事でしたが、全体に公開してみます。(全体公開は初です。)
+こうした方がいいよがあればコメントください。
 
-| OS     | ARCH    | GPU  |
-| :----- | :------ | :--- |
-| Ubuntu | amd64   | True |
-| Ubuntu | ppc64le | True |
+`$`マークはコピペしやすい様にあえて付けていません。
+
+## Kubernetes + Nvidia Docker の構築(まだ途中です。)
+
+## 検証済み環境
+
+| OS           | ARCH    | docker Ver.                              | ESXi           |
+| :----------- | :------ | :--------------------------------------- | :------------- |
+| Ubuntu 18.04 | amd64   | Docker version 19.03.5, build 633a0ea838 | 6.7 Custom ISO |
+| Ubuntu 18.04 | ppc64le | Docker version 18.06.1-ce, build e68fc7a | None           |
+
+ppc64le は[IBM Power System AC922 POWER9](https://www.ibm.com/jp-ja/marketplace/power-systems-ac922)で検証
+
+コンテナイメージはそれぞれのアーキテクチャに合わせる必要があります。
 
 ## docker のインストール(docker-ce)
 
@@ -49,6 +60,7 @@ sudo apt-get update
 # dockerのインストール
 sudo apt-get install -y docker-ce
 
+# ユーザーの追加
 sudo usermod -aG docker $USER
 
 # dockerサービスの自動起動
@@ -65,6 +77,7 @@ sudo systemctl start docker
 ```bash:bash
 # インストール可能なリスト
 apt-cache madison docker-ce
+
 # バージョンを指定してインストール
 sudo apt-get install docker-ce=<VERSION_STRING> docker-ce-cli=<VERSION_STRING> containerd.io
 ```
@@ -88,10 +101,9 @@ sudo apt install -y kubeadm
 ### スワップ OFF
 
 ```bash:bash
+## 都度適応？
+## /etc/fstabを削除すると泣くことになる -> なぜかdockerが立ち上がらなくなる
 sudo swapoff -a
-
-## 再起動後に適応される？
-
 ```
 
 ### kubeadm でセットアップ
@@ -114,17 +126,17 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 これをしないと`core-dns`の pod が起動しない
 
-### [flannel.yaml](flannel.yaml) の追加
+### [flannel.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/flannel.yaml) の追加
 
 `kubectl -f flannel.yml`
 
 ### LoadBranser の構築
 
-[`metallb.yaml`](metallb.yaml)を適用する
+[metallb.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/metallb.yaml)を適用する
 
 `kubectl apply metallb.yaml`
 
-LAN 内の IP に割り振る yaml を apply する
+[LAN 内の IP に割り振る yaml を apply する](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/metallb-config.yaml)
 
 ```yaml:metallb-config.yaml
 ---
@@ -169,10 +181,7 @@ Master を構築した時に最後に表示される`--token` `--discovery-token
 
 ```bash:bash
 # tokenが不明になった場合は再度発行すれば良い
-kubeadm token create
-openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | \
-openssl rsa -pubin -outform der 2>/dev/null | \
-openssl dgst -sha256 -hex | sed 's/^.* //'
+kubeadm token create --print-join-command
 ```
 
 ### Node が追加されたか確認
@@ -189,7 +198,7 @@ Node1          Ready    <none>   2m10s   v1.17.1
 kubernetes リポジトリから直接デプロイする場合はクラスタ内部からしかアクセス出来ないため、
 NodePort を設定した`recommended.yaml`をデプロイする。
 ただし、リポジトリから直接デプロイし、NodePort を設定しても
-[issue](https://github.com/kubernetes/dashboard/issues/3804) にある様なエラーが発生するためここではすでに用意している[`dashboard/recommended.yaml`](dashboard/recommended.yaml)を使用する
+[issue](https://github.com/kubernetes/dashboard/issues/3804) にある様なエラーが発生するためここではすでに用意している[dashboard/recommended.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/dashboard/recommended.yaml)を使用する
 また、その際に証明書の設定をする必要があるため、下記を実施すること
 
 ### 自己証明書の発行
@@ -221,9 +230,9 @@ kubectl -n kubernetes-dashboard delete secret kubernetes-dashboard-certs
 # certs/dashboard.crt
 # certs/dashboard.csr
 # certs/dashboard.key
-
-echo -n 'certs/dashboard.crtの内容(-----BEGIN CERTIFICATE----- XXXX -----END CERTIFICATE-----)' | base64
-Y2VydHMvZGFzaGJvYXJkLmNydOOBruWGheWuuSgtLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS0gWFhYWCAtLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tKQ==
+cat certs/dashboard.crt | base64
+cat certs/dashboard.csr | base64
+cat certs/dashboard.key | base64
 ```
 
 [recommended.yaml](dashboard/recommended.yaml) の編集
@@ -287,4 +296,4 @@ kubectl describe secret -n kubernetes-dashboard admin-user-token-xxxxx
 
 `トークン`を選択し、`トークンを入力`にペーストし、サインインを行う。
 
-![dashboard](https://github.com/ncs-nozomi-nishinohara/kubernetes-Construction/blob/master/dashboard/dashboard.png)
+![dashboard](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/dashboard/dashboard.png)
