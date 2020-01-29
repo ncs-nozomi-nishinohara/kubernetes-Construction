@@ -5,7 +5,7 @@
 
 `$`マークはコピペしやすい様にあえて付けていません。
 
-## Kubernetes + Nvidia Docker の構築(まだ途中です。)
+## Kubernetes + Nvidia Docker の構築
 
 ## 検証済み環境
 
@@ -106,6 +106,16 @@ sudo apt install -y kubeadm
 sudo swapoff -a
 ```
 
+/etc/fstabを以下のようにコメントアウトを行うことで一旦は対応できました。
+
+`sudo nano /etc/fstab`
+
+```diff:/etc/fstab
+- /swap.img      none    swap    sw      0       0
++ #/swap.img      none    swap    sw      0       0
+```
+
+
 ### kubeadm でセットアップ
 
 ```bash:bash
@@ -128,13 +138,13 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 ### [flannel.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/flannel.yaml) の追加
 
-`kubectl -f flannel.yml`
+`kubectl apply -f flannel.yml`
 
 ### LoadBranser の構築
 
 [metallb.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/metallb.yaml)を適用する
 
-`kubectl apply metallb.yaml`
+`kubectl apply -f metallb.yaml`
 
 [LAN 内の IP に割り振る yaml を apply する](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/metallb-config.yaml)
 
@@ -193,7 +203,7 @@ Master         Ready    master   3m11s   v1.17.1
 Node1          Ready    <none>   2m10s   v1.17.1
 ```
 
-### DashBorad のデプロイ
+### DashBorad(v2.0.0-rc2) のデプロイ
 
 kubernetes リポジトリから直接デプロイする場合はクラスタ内部からしかアクセス出来ないため、
 NodePort を設定した`recommended.yaml`をデプロイする。
@@ -205,8 +215,9 @@ NodePort を設定した`recommended.yaml`をデプロイする。
 
 ```bash:bash
 mkdir certs
-openssl req -nodes -newkey rsa:2048 -keyout certs/dashboard.key -out certs/dashboard.csr -subj "/C=/ST=/L=/O=/OU=/CN=kubernetes-dashboard"
+openssl req -nodes -newkey rsa:2048 -keyout certs/dashboard.key -out certs/dashboard.csr -subj "/C=JP/ST=kubernetes/L=kubernetes/O=kubernetes/OU=kubernetes/CN=kubernetes-dashboard"
 openssl x509 -req -sha256 -days 365 -in certs/dashboard.csr -signkey certs/dashboard.key -out certs/dashboard.crt
+
 ```
 
 ### すでに定義されている分を削除(直接デプロイした場合)
@@ -222,7 +233,7 @@ kubectl -n kubernetes-dashboard delete secret kubernetes-dashboard-certs
 - certs/dashboard.csr
 - certs/dashboard.key
 
-上記の証明書ファイルを Secret オブジェクトへ設定できる形にする
+上記の証明書ファイルを Secret オブジェクトへ設定できる形にする(改行コードは含めず1行で設定)
 
 ```bash:bash
 # base64形式で設定する必要があるのでbase64コマンドで設定する
@@ -235,7 +246,7 @@ cat certs/dashboard.csr | base64
 cat certs/dashboard.key | base64
 ```
 
-[recommended.yaml](dashboard/recommended.yaml) の編集
+[recommended.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/dashboard/recommended.yaml) の編集
 
 ```yaml:recommended.yaml
 ---
@@ -262,7 +273,7 @@ apply する！
 ログイン画面には token or kubeconfig が求められます。
 今回は Token を用いてログインする方法を記載します。
 
-- [token を発行するユーザーの apply](dashboard/admin-user.yaml)
+- [token を発行するユーザーの apply](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/dashboard/admin-user.yaml)
 
 ```yaml:admin-user.yaml
 apiVersion: v1
@@ -297,3 +308,158 @@ kubectl describe secret -n kubernetes-dashboard admin-user-token-xxxxx
 `トークン`を選択し、`トークンを入力`にペーストし、サインインを行う。
 
 ![dashboard](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/dashboard/dashboard.png)
+
+## GPUへの対応
+
+ESXi上のUbuntuへ対応する場合は下記を設定する(シャットダウンをした状態で)
+
+### GPUパススルーの設定
+
+ホスト > 管理 > ハードウェア > 該当のGPUを選択し、`パススルーの切り替え`を押下 > 再起動
+
+### PCIデバイスの追加
+
+設定の編集からPCIデバイスの追加
+GPU以外にパススルーされてるものも一緒に追加する
+
+### ゲストOS上からGPUが認識出来るように設定
+
+仮想マシンのオプション > 詳細 > 構成の編集に下記の設定を追加
+
+| キー | 値 |
+| :-- | :--|
+| hypervisor.cpuid.v0| FALSE |
+
+### グラボの確認
+
+`lspci | grep -i nvidia`
+
+正しく表示されなかった場合は情報をアップデートする
+
+`sudo update-pciids`
+
+## CUDAのインストール(docker:v19.03は不要)
+
+以下のサイトから自身のGPUに適応出来るCUDAをインストールする
+
+[CUDA toolkit](https://developer.nvidia.com/cuda-toolkit)
+
+```bash:参考
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
+sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
+sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
+sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
+sudo apt-get update
+sudo apt-get -y install cuda
+```
+`.bashrc`にパスを追加
+
+```bash
+export PATH="/usr/local/cuda/bin:$PATH"
+export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"
+```
+
+再起動を行う
+
+`sudo shutdown -r now`
+
+### NVIDIA Graphics Driver をインストールする
+
+```bash
+sudo add-apt-repository ppa:graphics-drivers/ppa
+sudo apt update
+```
+
+推奨ドライバーをインストール
+
+```bash
+sudo apt -y install ubuntu-drivers-common
+sudo ubuntu-drivers autoinstall
+```
+
+### NVIDIA Container Toolkitのインストール
+
+`NVIDIA Container Toolkit`をインストールする為にリポジトリに`apt`に追加
+
+```bash
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+```
+
+`NVIDIA Container Toolkit`のインストールと`Docker`の再起動
+
+```bash
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+sudo systemctl restart docker
+```
+
+再起動を行う
+
+`sudo shutdown -r now`
+
+インストール後の確認
+ドライバーとCUDAのバージョンが確認出来る
+
+```bash
+nvidia-container-cli info
+
+NVRM version:   440.48.02
+CUDA version:   10.2
+
+Device Index:   0
+Device Minor:   0
+Model:          GeForce RTX 2070
+Brand:          GeForce
+GPU UUID:       GPU-2318f1ba-cc45-3c5b-a000-798ad9ba8390
+Bus Location:   00000000:0b:00.0
+Architecture:   7.5
+```
+
+Dockerから使用可能かどうか確認
+
+```bash
+docker run --rm --gpus all -it ubuntu nvidia-smi
+
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 440.48.02    Driver Version: 440.48.02    CUDA Version: N/A      |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce RTX 2070    Off  | 00000000:0B:00.0 Off |                  N/A |
+| 29%   33C    P8    21W / 175W |      0MiB /  7982MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+```
+
+### KubernetesにGPUを認識させる
+
+`nvidia-container-runtime`をインストール(docker:v19.03で必要)
+
+`sudo apt-get install nvidia-container-runtime`
+
+kubernetesから使用出来るように`Docker`のデフォルトランタイムをGPUに変更
+
+```json:/etc/docker/daemon.json
+{
+    "default-runtime": "nvidia",
+    "runtimes": {
+        "nvidia": {
+            "path": "/usr/bin/nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+```
+
+gpu-pluginを適用
+
+`kubectl apply -f https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/nvidia-device-plugin.yml`
+
