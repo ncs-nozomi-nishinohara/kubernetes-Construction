@@ -1,8 +1,5 @@
 # [kubernetes-construction](https://github.com/ncs-nozomi-nishinohara/kubernetes-Construction)
 
-常駐先の社内勉強会用の記事でしたが、全体に公開してみます。(全体公開は初です。)
-こうした方がいいよがあればコメントください。
-
 `$`マークはコピペしやすい様にあえて付けていません。
 
 ## Kubernetes + Nvidia Docker の構築
@@ -82,7 +79,9 @@ apt-cache madison docker-ce
 sudo apt-get install docker-ce=<VERSION_STRING> docker-ce-cli=<VERSION_STRING> containerd.io
 ```
 
-## kubernetes インストール
+## kubernetes インストール(Master/Worker)
+
+特段何も記載されていない場合はMaster/Worker両方の作業です。
 
 ### リポジトリにキーの登録
 
@@ -116,13 +115,13 @@ sudo swapoff -a
 ```
 
 
-### kubeadm でセットアップ
+### kubeadm でセットアップ(Worker Node)
 
 ```bash:bash
 sudo kubeadm init --pod-network-cidr=10.244.0.0/16
 ```
 
-### kubernetes config の追加
+### kubernetes config の追加(Master)
 
 ```bash:bash
 mkdir -p $HOME/.kube
@@ -136,11 +135,11 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 これをしないと`core-dns`の pod が起動しない
 
-### [flannel.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/flannel.yaml) の追加
+### [flannel.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/flannel.yaml) の追加(Master)
 
 `kubectl apply -f flannel.yml`
 
-### LoadBranser の構築
+### LoadBranser の構築(Master)
 
 [metallb.yaml](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/metallb.yaml)を適用する
 
@@ -179,7 +178,7 @@ Taints:             <none>
 # 上記になっていることを確認
 ```
 
-### Master へ Node を追加する
+### Master へ Node を追加する(Worker)
 
 ```bash:bash
 sudo kubeadm join xxx.xxx.xxx.xxx:6443 --token xxxxxx.xxxxxxxxxxxxx --discovery-token-ca-cert-hash sha256:xxxxxxx
@@ -187,14 +186,14 @@ sudo kubeadm join xxx.xxx.xxx.xxx:6443 --token xxxxxx.xxxxxxxxxxxxx --discovery-
 
 Master を構築した時に最後に表示される`--token` `--discovery-token-ca-cert-hash`を設定する
 
-### Token が不明になった場合
+### Token が不明になった場合(Master)
 
 ```bash:bash
 # tokenが不明になった場合は再度発行すれば良い
 kubeadm token create --print-join-command
 ```
 
-### Node が追加されたか確認
+### Node が追加されたか確認(Master)
 
 ```bash:bash
 kubectl get nodes
@@ -203,7 +202,7 @@ Master         Ready    master   3m11s   v1.17.1
 Node1          Ready    <none>   2m10s   v1.17.1
 ```
 
-### DashBorad(v2.0.0-rc2) のデプロイ
+### DashBorad(v2.0.0-rc2) のデプロイ(以下、Masterでの作業)
 
 kubernetes リポジトリから直接デプロイする場合はクラスタ内部からしかアクセス出来ないため、
 NodePort を設定した`recommended.yaml`をデプロイする。
@@ -309,7 +308,7 @@ kubectl describe secret -n kubernetes-dashboard admin-user-token-xxxxx
 
 ![dashboard](https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/dashboard/dashboard.png)
 
-## GPUへの対応
+## GPUへの対応(以下、Workerでの作業)
 
 ESXi上のUbuntuへ対応する場合は下記を設定する(シャットダウンをした状態で)
 
@@ -459,7 +458,7 @@ kubernetesから使用出来るように`Docker`のデフォルトランタイ�
 }
 ```
 
-gpu-pluginを適用
+gpu-pluginを適用(Master)
 
 `kubectl apply -f https://raw.githubusercontent.com/ncs-nozomi-nishinohara/kubernetes-Construction/master/nvidia-device-plugin.yml`
 
